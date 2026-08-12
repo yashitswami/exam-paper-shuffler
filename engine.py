@@ -7,58 +7,81 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def sanitize_text_for_word(text):
     """
-    Converts LaTeX formulas and symbols into clean, human-readable text for Word documents.
+    Converts raw LaTeX equations and code into clean, readable plain text for Word documents.
     """
     if pd.isna(text) or text is None:
         return ""
     
     t = str(text).strip()
     
-    # 1. Superscripts and Subscripts Map
-    sub_map = str.maketrans("0123456789+-=()ijknpx", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ᵢⱼₖₙₚₓ")
-    sup_map = str.maketrans("0123456789+-=()n", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ")
+    # 1. Unescape HTML / URL entities
+    t = t.replace('&lt;', '<').replace('&gt;', '>')
+    t = t.replace(r'\lt', '<').replace(r'\gt', '>')
     
-    # Convert _{x} and ^{x}
-    t = re.sub(r'\_\{([^}]+)\}', lambda m: m.group(1).translate(sub_map), t)
-    t = re.sub(r'\^\{([^}]+)\}', lambda m: m.group(1).translate(sup_map), t)
-    t = re.sub(r'\_([0-9a-z])', lambda m: m.group(1).translate(sub_map), t)
-    t = re.sub(r'\^([0-9a-z])', lambda m: m.group(1).translate(sup_map), t)
+    # 2. Remove LaTeX environments (matrix, array, align) & table markup
+    t = re.sub(r'\\begin\{(matrix|array|align|equation|table)\}(?:\[[^\]]*\])?(?:\{[^}]*\})?', '', t)
+    t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '', t)
+    t = t.replace(r'\hline', ' | ').replace(r'\quad', ' ')
     
-    # 2. Fractions: \frac{a}{b} -> (a / b)
-    t = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', t)
+    # 3. Clean text formatting commands FIRST (before math/superscript processing)
+    t = re.sub(r'\\text(?:bf|it|rm|sf|tt)?\{([^}]+)\}', r'\1', t)
+    t = re.sub(r'\\math(?:rm|bf|it|sf|bb|cal)?\{([^}]+)\}', r'\1', t)
     
-    # 3. Square roots: \sqrt{x} -> √(x)
+    # 4. Vectors and Unit Vectors
+    t = re.sub(r'\\(?:overrightarrow|vec)\{([^}]+)\}', r'\1', t)
+    t = re.sub(r'\\(?:widehat|hat)\{([ijk])\}', r'\1̂', t)
+    t = re.sub(r'\\(?:widehat|hat)\{([^}]+)\}', r'\1', t)
+    
+    # 5. Fractions (\frac and \dfrac)
+    while re.search(r'\\d?frac\{', t):
+        t = re.sub(r'\\d?frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', t)
+        
+    # 6. Square Roots (\sqrt)
+    t = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', t)
     t = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', t)
     t = re.sub(r'\\sqrt\s*([a-zA-Z0-9]+)', r'√\1', t)
     
-    # 4. Greek Letters & Math Symbols Translation
-    replacements = {
-        r'\alpha': 'α', r'\beta': 'β', r'\gamma': 'γ', r'\delta': 'δ',
-        r'\epsilon': 'ε', r'\theta': 'θ', r'\lambda': 'λ', r'\mu': 'μ',
-        r'\pi': 'π', r'\sigma': 'σ', r'\omega': 'ω', r'\Delta': 'Δ',
-        r'\Omega': 'Ω', r'\times': '×', r'\div': '÷', r'\pm': '±',
-        r'\le': '≤', r'\leq': '≤', r'\ge': '≥', r'\geq': '≥',
-        r'\neq': '≠', r'\approx': '≈', r'\infty': '∞', r'\rightarrow': '→',
-        r'\leftarrow': '←', r'\Rightarrow': '⇒', r'\degree': '°',
-        r'\textemdash': '-', r'\cdot': '·'
-    }
+    # 7. Delimiters (\left, \right)
+    t = re.sub(r'\\left\s*\\?([(\[{|.])', r'\1', t)
+    t = re.sub(r'\\right\s*\\?([)\\]}|.])', r'\1', t)
+    t = t.replace(r'\{', '{').replace(r'\}', '}')
     
-    for latex, symbol in replacements.items():
-        t = t.replace(latex, symbol)
+    # 8. Trigonometric & Math Functions
+    t = re.sub(r'\\(sin|cos|tan|cot|sec|csc|log|ln)\b', r'\1', t)
+    
+    # 9. Greek letters, Operators, & LaTeX Symbols (Using strict word boundaries)
+    replacements = [
+        (r'\\alpha\b', 'α'), (r'\\beta\b', 'β'), (r'\\gamma\b', 'γ'), (r'\\delta\b', 'δ'),
+        (r'\\epsilon\b', 'ε'), (r'\\theta\b', 'θ'), (r'\\lambda\b', 'λ'), (r'\\mu\b', 'μ'),
+        (r'\\pi\b', 'π'), (r'\\sigma\b', 'σ'), (r'\\omega\b', 'ω'), (r'\\Delta\b', 'Δ'),
+        (r'\\Omega\b', 'Ω'), (r'\\times\b', '×'), (r'\\div\b', '÷'), (r'\\pm\b', '±'),
+        (r'\\leq?\b', '≤'), (r'\\geq?\b', '≥'), (r'\\neq\b', '≠'), (r'\\approx\b', '≈'),
+        (r'\\infty\b', '∞'), (r'\\rightarrow\b', '→'), (r'\\leftarrow\b', '←'),
+        (r'\\Rightarrow\b', '⇒'), (r'\\degree\b', '°'), (r'\\circ\b', '°'),
+        (r'\\textemdash\b', '-'), (r'\\cdot\b', '·'), (r'\\textbardbl\b', '='),
+        (r'\\overset\{([^}]+)\}\{([^}]+)\}', r'\2(\1)'), (r'\\colon\b', ':')
+    ]
+    for pattern, symbol in replacements:
+        t = re.sub(pattern, symbol, t)
         
-    # 5. Remove structural LaTeX wrappers
-    t = re.sub(r'\\text(bf|it|rm|sf|tt)?\{([^}]+)\}', r'\2', t)
-    t = re.sub(r'\\mathrm\{([^}]+)\}', r'\1', t)
-    t = re.sub(r'\\math[a-z]+\{([^}]+)\}', r'\1', t)
+    # 10. Superscripts and Subscripts (Numbers and basic operators only)
+    sub_map = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
+    sup_map = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
     
-    # Clean up formatting delimeters: $, \(, \), \[, \], \left, \right
-    t = t.replace(r'\left', '').replace(r'\right', '')
-    t = t.replace(r'\(', '').replace(r'\)', '')
-    t = t.replace(r'\[', '').replace(r'\]', '')
+    t = re.sub(r'\_\{([0-9+\-=()]+)\}', lambda m: m.group(1).translate(sub_map), t)
+    t = re.sub(r'\^\{([0-9+\-=()]+)\}', lambda m: m.group(1).translate(sup_map), t)
+    t = re.sub(r'\_([0-9])', lambda m: m.group(1).translate(sub_map), t)
+    t = re.sub(r'\^([0-9])', lambda m: m.group(1).translate(sup_map), t)
+    
+    # Common exponents
+    t = t.replace('^-1', '⁻¹').replace('^-2', '⁻²').replace('^-3', '⁻³')
+    t = t.replace('^2', '²').replace('^3', '³')
+
+    # 11. Final Cleanup of Math mode delimiters and residual backslashes
     t = t.replace('$', '')
-    
-    # Clean up any leftover stray backslashes before words
-    t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)
+    t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)  # Strip remaining \command prefixes
+    t = re.sub(r'\\\s*', ' ', t)            # Strip escaped spaces
+    t = re.sub(r'\s+', ' ', t)              # Normalize multiple spaces
     
     return t.strip()
 
