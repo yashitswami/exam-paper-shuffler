@@ -1,3 +1,11 @@
+import sys, subprocess
+
+# Auto-install missing word generation library on Streamlit Cloud if requirements.txt was skipped
+try:
+    import docx
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-docx", "openpyxl"])
+
 import streamlit as st
 import os, zipfile, shutil
 from engine import process_and_shuffle
@@ -7,7 +15,7 @@ st.set_page_config(page_title="Major Test Paper Generator", layout="centered")
 st.title("🎓 Major Test Paper Shuffler Portal")
 st.write("Upload your Excel question bank to generate randomized paper sets and EvalBee OMR Keys.")
 
-# Initialize session state memory
+# Initialize session state memory so outputs stay on screen
 if "zip_data" not in st.session_state:
     st.session_state.zip_data = None
 if "zip_name" not in st.session_state:
