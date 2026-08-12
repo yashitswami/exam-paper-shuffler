@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import pandas as pd
 import numpy as np
 import os, re
@@ -74,7 +75,6 @@ def replace_overunder_sets(text):
             if base is None:
                 break
             
-            # Clean up structural bond symbols inside top/base
             top_clean = top.replace(r'\mid', '').replace('|', '').replace('=', '').replace(r'\textbardbl', '=').strip()
             top_clean = re.sub(r'^\{+|\}$', '', top_clean)
             base_clean = base.replace(r'\mid', '').replace('|', '').strip()
@@ -100,7 +100,6 @@ def sanitize_text_for_word(text):
     
     t = str(text).strip()
     
-    # Preserve URLs before applying LaTeX transformations
     urls = []
     def preserve_url(match):
         urls.append(match.group(0).replace(r'\_', '_'))
@@ -108,49 +107,38 @@ def sanitize_text_for_word(text):
     
     t = re.sub(r'https?://[^\s]+', preserve_url, t)
     
-    # 1. Unescape HTML / URL entities
     t = t.replace('&lt;', '<').replace('&gt;', '>')
     t = t.replace(r'\lt', '<').replace(r'\gt', '>')
     
-    # 2. Structural chemical Overset / Underset replacement
     t = replace_overunder_sets(t)
-
-    # 3. Fractions replacement with balanced brace handling
     t = replace_fractions(t)
 
-    # 4. Clean Matrices / Arrays / Tables
     t = re.sub(r'\\begin\{(matrix|array|align|equation|table)\}(?:\[[^\]]*\])?(?:\{[^}]*\})?', '', t)
     t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '', t)
     t = t.replace(r'\\', ' ').replace(r'\hline', '').replace(r'\quad', ' ')
     t = re.sub(r'\s*&\s*', ' | ', t)
     
-    # 5. Clean Text Formatting Commands
     t = re.sub(r'\\text(?:bf|it|rm|sf|tt)?\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\math(?:rm|bf|it|sf|bb|cal)?\{([^}]+)\}', r'\1', t)
     t = t.replace(r'\displaystyle', '')
     
-    # 6. Vectors and Unit Vectors
     t = re.sub(r'\\(?:overrightarrow|vec)\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\(?:widehat|hat)\{([ijk])\}', r'\1̂', t)
     t = re.sub(r'\\(?:widehat|hat)\{([^}]+)\}', r'\1', t)
     
-    # 7. Square Roots (\sqrt)
     t = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', t)
     t = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', t)
     t = re.sub(r'\\sqrt\s*([a-zA-Z0-9]+)', r'√\1', t)
     
-    # 8. Delimiters (\left, \right, \lbrack, \rbrack)
     t = re.sub(r'\\(left|right)\b', '', t)
     t = t.replace(r'\leftlbrack', '[').replace(r'\rightrbrack', ']')
     t = t.replace(r'\lbrack', '[').replace(r'\rbrack', ']')
     t = t.replace(r'\{', '{').replace(r'\}', '}')
     
-    # 9. Inverse Trig & Math Functions (e.g., \sin^{-1}, \tan^{-1})
     t = re.sub(r'\\(sin|cos|tan|cot|sec|csc)\^\{\s*\-\s*1\s*\}', r'\1⁻¹', t)
     t = re.sub(r'\\(sin|cos|tan|cot|sec|csc)\b', r'\1', t)
     t = re.sub(r'\\(log|ln)\b', r'\1', t)
     
-    # 10. Greek letters, Operators, & Symbols
     replacements = [
         (r'\\alpha\b', 'α'), (r'\\beta\b', 'β'), (r'\\gamma\b', 'γ'), (r'\\delta\b', 'δ'),
         (r'\\epsilon\b', 'ε'), (r'\\theta\b', 'θ'), (r'\\lambda\b', 'λ'), (r'\\mu\b', 'μ'),
@@ -164,42 +152,32 @@ def sanitize_text_for_word(text):
     for pattern, symbol in replacements:
         t = re.sub(pattern, symbol, t)
 
-    # Clean Degree Notation artifacts like {^{°}}, {^°}, {°}
     t = re.sub(r'\{\s*\^?\s*°\s*\}', '°', t)
     t = re.sub(r'\^\s*°', '°', t)
     t = t.replace('{°}', '°')
         
-    # 11. Superscripts and Subscripts (handles negative signs and spaces gracefully)
     sub_map = str.maketrans("0123456789+-=() ", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ ")
     sup_map = str.maketrans("0123456789+-=() ", "⁰¹²³⁴⁵₆₇⁸⁹⁺⁻⁼⁽⁾ ")
     
-    # Translate _{...} and ^{...}
     t = re.sub(r'\_\{([0-9+\-=()\s]+)\}', lambda m: m.group(1).translate(sub_map), t)
     t = re.sub(r'\^\{([0-9+\-=()\s]+)\}', lambda m: m.group(1).translate(sup_map), t)
     t = re.sub(r'\_([0-9])', lambda m: m.group(1).translate(sub_map), t)
     t = re.sub(r'\^([0-9])', lambda m: m.group(1).translate(sup_map), t)
     
-    # Normalize common units / exponents
     t = t.replace('⁻ 1', '⁻¹').replace('⁻ 2', '⁻²').replace('⁻ 3', '⁻³')
     t = t.replace('⁺ 1', '⁺¹').replace('⁺ 2', '⁺²')
     t = t.replace('^-1', '⁻¹').replace('^-2', '⁻²').replace('^-3', '⁻³')
     t = t.replace('^2', '²').replace('^3', '³')
 
-    # 12. Final Cleanup
     t = t.replace('$', '').replace(r'\(', '').replace(r'\)', '')
     t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)
     t = re.sub(r'\\\s*', ' ', t)
     
-    # Restore URLs
     for idx, url in enumerate(urls):
         t = t.replace(f"__URL_PLACEHOLDER_{idx}__", url)
         
-    # Clean up double nested parentheses e.g. ( (4R / H) ) -> (4R / H)
     t = re.sub(r'\(\s*\(\s*([^()]+)\s*\)\s*\)', r'(\1)', t)
-    
-    # Remove artificial outer bracket wraps around numbers/units e.g. (60 kg) -> 60 kg
     t = re.sub(r'(?<![a-zA-Z0-9/])\(\s*([a-zA-Z0-9\s.=+\-²³α-ωΑ-Ω]+)\s*\)(?![a-zA-Z0-9/])', r'\1', t)
-
     t = re.sub(r'[ \t]+', ' ', t)
     
     return t.strip()
@@ -207,25 +185,21 @@ def sanitize_text_for_word(text):
 def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     
-    # Load Excel Data
     df = pd.read_excel(excel_file)
     df['Subject'] = df['Unnamed: 0'].ffill()
     
     sets = [f"Set {chr(65+i)}" for i in range(num_sets)]
     
-    # Subject section boundaries (JEE Main standard layout)
     sec_ranges = [
         ('Physics', 1, 20, 21, 25),
         ('Chemistry', 26, 45, 46, 50),
         ('Mathematics', 51, 70, 71, 75)
     ]
     
-    # Perform Shuffling Matrix Generation
     set_mappings = {}
     for s in sets:
         set_q_map = {}
         for subj, scq_start, scq_end, int_start, int_end in sec_ranges:
-            # 1. Shuffle Single Choice Questions (SCQs)
             scq_shuffled = list(range(scq_start, scq_end + 1))
             np.random.shuffle(scq_shuffled)
             for idx, master_q in enumerate(scq_shuffled):
@@ -238,7 +212,6 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
                     'opt_map_str': opt_map_str
                 }
                 
-            # 2. Shuffle Numerical / Integer Type Questions
             int_shuffled = list(range(int_start, int_end + 1))
             np.random.shuffle(int_shuffled)
             for idx, master_q in enumerate(int_shuffled):
@@ -249,7 +222,6 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
                 }
         set_mappings[s] = set_q_map
 
-    # 1. Create Master Shuffling Matrix CSV for EvalBee
     mapping_rows = []
     total_questions = len(df)
     for q in range(1, total_questions + 1):
@@ -265,19 +237,16 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
     csv_path = os.path.join(output_dir, "Master_Shuffling_Matrix.csv")
     pd.DataFrame(mapping_rows).to_csv(csv_path, index=False)
     
-    # 2. Build Word Documents (.docx) for Each Set
     generated_files = [csv_path]
     for s in sets:
         doc = Document()
         
-        # Configure page margins (0.7 inches)
         for section in doc.sections:
             section.top_margin = Inches(0.7)
             section.bottom_margin = Inches(0.7)
             section.left_margin = Inches(0.7)
             section.right_margin = Inches(0.7)
             
-        # Header Section
         header_p = doc.add_paragraph()
         header_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
@@ -296,7 +265,6 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
         
         doc.add_paragraph("-" * 80)
         
-        # Invert mapping to iterate sequentially by new question number (Q1 to Q75)
         new_to_master = {info['new_q']: (mq, info) for mq, info in set_mappings[s].items()}
         current_subj = None
         
@@ -305,7 +273,6 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
             row = df[df['Q.No'] == mq].iloc[0]
             subj = row['Subject']
             
-            # Subject Heading
             if subj != current_subj:
                 current_subj = subj
                 subj_p = doc.add_paragraph()
@@ -315,7 +282,6 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
                 sr.font.color.rgb = RGBColor(153, 0, 0)
                 doc.add_paragraph("=" * 60)
                 
-            # Integer Sub-section Heading
             if new_q in [21, 46, 71]:
                 num_p = doc.add_paragraph()
                 nr = num_p.add_run("Sub-Section: Numerical / Integer Type (Answer as Numerical Value)")
@@ -323,7 +289,6 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
                 nr.italic = True
                 nr.font.size = Pt(11)
                 
-            # Question Text
             qp = doc.add_paragraph()
             q_num_run = qp.add_run(f"Q.{new_q} ")
             q_num_run.bold = True
@@ -332,7 +297,6 @@ def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks,
             q_text_run = qp.add_run(sanitize_text_for_word(row['Qus']))
             q_text_run.font.size = Pt(10.5)
             
-            # SCQ Options vs Numerical Space
             is_integer_q = new_q in [21, 22, 23, 24, 25, 46, 47, 48, 49, 50, 71, 72, 73, 74, 75] or pd.isna(row['Opt A'])
             
             if not is_integer_q:
