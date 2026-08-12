@@ -7,21 +7,60 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def sanitize_text_for_word(text):
     """
-    Cleans LaTeX code for clean presentation in Word (.docx) documents.
+    Converts LaTeX formulas and symbols into clean, human-readable text for Word documents.
     """
     if pd.isna(text) or text is None:
         return ""
     
     t = str(text).strip()
     
-    # Replace LaTeX em-dash and common math formatting tags for clean Word rendering
-    t = t.replace(r'\textemdash', '-')
-    t = t.replace(r'\textbf', '')
-    t = t.replace(r'\text', '')
+    # 1. Superscripts and Subscripts Map
+    sub_map = str.maketrans("0123456789+-=()ijknpx", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ᵢⱼₖₙₚₓ")
+    sup_map = str.maketrans("0123456789+-=()n", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ")
+    
+    # Convert _{x} and ^{x}
+    t = re.sub(r'\_\{([^}]+)\}', lambda m: m.group(1).translate(sub_map), t)
+    t = re.sub(r'\^\{([^}]+)\}', lambda m: m.group(1).translate(sup_map), t)
+    t = re.sub(r'\_([0-9a-z])', lambda m: m.group(1).translate(sub_map), t)
+    t = re.sub(r'\^([0-9a-z])', lambda m: m.group(1).translate(sup_map), t)
+    
+    # 2. Fractions: \frac{a}{b} -> (a / b)
+    t = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', t)
+    
+    # 3. Square roots: \sqrt{x} -> √(x)
+    t = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', t)
+    t = re.sub(r'\\sqrt\s*([a-zA-Z0-9]+)', r'√\1', t)
+    
+    # 4. Greek Letters & Math Symbols Translation
+    replacements = {
+        r'\alpha': 'α', r'\beta': 'β', r'\gamma': 'γ', r'\delta': 'δ',
+        r'\epsilon': 'ε', r'\theta': 'θ', r'\lambda': 'λ', r'\mu': 'μ',
+        r'\pi': 'π', r'\sigma': 'σ', r'\omega': 'ω', r'\Delta': 'Δ',
+        r'\Omega': 'Ω', r'\times': '×', r'\div': '÷', r'\pm': '±',
+        r'\le': '≤', r'\leq': '≤', r'\ge': '≥', r'\geq': '≥',
+        r'\neq': '≠', r'\approx': '≈', r'\infty': '∞', r'\rightarrow': '→',
+        r'\leftarrow': '←', r'\Rightarrow': '⇒', r'\degree': '°',
+        r'\textemdash': '-', r'\cdot': '·'
+    }
+    
+    for latex, symbol in replacements.items():
+        t = t.replace(latex, symbol)
+        
+    # 5. Remove structural LaTeX wrappers
+    t = re.sub(r'\\text(bf|it|rm|sf|tt)?\{([^}]+)\}', r'\2', t)
+    t = re.sub(r'\\mathrm\{([^}]+)\}', r'\1', t)
+    t = re.sub(r'\\math[a-z]+\{([^}]+)\}', r'\1', t)
+    
+    # Clean up formatting delimeters: $, \(, \), \[, \], \left, \right
+    t = t.replace(r'\left', '').replace(r'\right', '')
     t = t.replace(r'\(', '').replace(r'\)', '')
     t = t.replace(r'\[', '').replace(r'\]', '')
+    t = t.replace('$', '')
     
-    return t
+    # Clean up any leftover stray backslashes before words
+    t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)
+    
+    return t.strip()
 
 def process_and_shuffle(excel_file, num_sets, exam_title, time_limit, max_marks, output_dir):
     os.makedirs(output_dir, exist_ok=True)
