@@ -1,13 +1,24 @@
-import sys, subprocess
+import sys, os, subprocess
 
-# Auto-install missing libraries with user permissions on Streamlit Cloud
+# Install missing libraries into the writable /tmp folder to bypass server permissions
+custom_lib_dir = "/tmp/my_lib"
+if custom_lib_dir not in sys.path:
+    sys.path.insert(0, custom_lib_dir)
+
 try:
     import docx
+    import openpyxl
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "python-docx", "openpyxl"])
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", 
+        "--target", custom_lib_dir, 
+        "python-docx==1.1.0", "openpyxl"
+    ])
+    import docx
+    import openpyxl
 
 import streamlit as st
-import os, zipfile, shutil
+import zipfile, shutil
 from engine import process_and_shuffle
 
 st.set_page_config(page_title="Major Test Paper Generator", layout="centered")
