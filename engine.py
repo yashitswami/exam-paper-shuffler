@@ -7,67 +7,86 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def sanitize_text_for_word(text):
     """
-    Converts raw LaTeX equations into clean, readable plain text for Word documents safely.
+    Converts raw LaTeX equations, structural formulas, and URLs into clean, 
+    readable plain text for Word documents.
     """
     if pd.isna(text) or text is None:
         return ""
     
     t = str(text).strip()
     
+    # Preserve URLs before applying LaTeX transformations
+    urls = []
+    def preserve_url(match):
+        urls.append(match.group(0).replace(r'\_', '_'))
+        return f"__URL_PLACEHOLDER_{len(urls)-1}__"
+    
+    t = re.sub(r'https?://[^\s]+', preserve_url, t)
+    
     # 1. Unescape HTML / URL entities
     t = t.replace('&lt;', '<').replace('&gt;', '>')
     t = t.replace(r'\lt', '<').replace(r'\gt', '>')
     
-    # 2. Remove LaTeX environments (matrix, array, align) & table markup
-    t = re.sub(r'\\begin\{(matrix|array|align|equation|table)\}(?:\[[^\]]*\])?(?:\{[^}]*\})?', '', t)
-    t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '', t)
-    t = t.replace(r'\hline', ' | ').replace(r'\quad', ' ')
+    # 2. Convert Overset / Underset (Chemical / Structural notation)
+    while r'\overset' in t or r'\underset' in t:
+        t_new = re.sub(r'\\overset\{([^}]*)\}\{([^}]*)\}', r'\2(\1)', t)
+        t_new = re.sub(r'\\underset\{([^}]*)\}\{([^}]*)\}', r'\2(\1)', t_new)
+        if t_new == t:
+            break
+        t = t_new
+
+    # 3. Clean Matrices / Arrays / Tables
+    t = re.sub(r'\\begin\{(matrix|array|align|equation|table)\}(?:\[[^\]]*\])?(?:\{[^}]*\})?', '\n', t)
+    t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '\n', t)
+    t = t.replace(r'\\', '\n').replace(r'\hline', '').replace(r'\quad', ' ')
+    t = re.sub(r'\s*&\s*', ' | ', t)
     
-    # 3. Clean text formatting commands FIRST
+    # 4. Clean Text Formatting Commands
     t = re.sub(r'\\text(?:bf|it|rm|sf|tt)?\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\math(?:rm|bf|it|sf|bb|cal)?\{([^}]+)\}', r'\1', t)
+    t = t.replace(r'\displaystyle', '')
     
-    # 4. Vectors and Unit Vectors
+    # 5. Vectors and Unit Vectors
     t = re.sub(r'\\(?:overrightarrow|vec)\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\(?:widehat|hat)\{([ijk])\}', r'\1̂', t)
     t = re.sub(r'\\(?:widehat|hat)\{([^}]+)\}', r'\1', t)
     
-    # 5. SAFE Fraction Replacement (Max 5 passes to prevent infinite loops)
+    # 6. Fractions (\frac and \dfrac)
     for _ in range(5):
         new_t = re.sub(r'\\d?frac\{([^{}]+)\}\{([^{}]+)\}', r'(\1 / \2)', t)
         if new_t == t:
             break
         t = new_t
         
-    # 6. Square Roots (\sqrt)
+    # 7. Square Roots (\sqrt)
     t = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', t)
     t = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', t)
     t = re.sub(r'\\sqrt\s*([a-zA-Z0-9]+)', r'√\1', t)
     
-    # 7. Delimiters (\left, \right)
-    t = re.sub(r'\\left\s*\\?([(\[{|.])', r'\1', t)
-    t = re.sub(r'\\right\s*\\?([)\\]}|.])', r'\1', t)
+    # 8. Delimiters (\left, \right, \lbrack, \rbrack)
+    t = re.sub(r'\\(left|right)\b', '', t)
+    t = t.replace(r'\leftlbrack', '[').replace(r'\rightrbrack', ']')
+    t = t.replace(r'\lbrack', '[').replace(r'\rbrack', ']')
     t = t.replace(r'\{', '{').replace(r'\}', '}')
     
-    # 8. Trigonometric & Math Functions
-    t = re.sub(r'\\(sin|cos|tan|cot|sec|csc|log|ln)\b', r'\1', t)
+    # 9. Trigonometric & Math Functions
+    t = re.sub(r'\\(sin|cos|tan|cot|sec|csc|log|ln)\b', r' \1 ', t)
     
-    # 9. Greek letters, Operators, & LaTeX Symbols
+    # 10. Greek letters, Operators, & Symbols
     replacements = [
-        (r'\\alpha\b', 'α'), (r'\\beta\b', 'β'), (r'\\gamma\b', 'γ'), (r'\\delta\b', 'δ'),
-        (r'\\epsilon\b', 'ε'), (r'\\theta\b', 'θ'), (r'\\lambda\b', 'λ'), (r'\\mu\b', 'μ'),
-        (r'\\pi\b', 'π'), (r'\\sigma\b', 'σ'), (r'\\omega\b', 'ω'), (r'\\Delta\b', 'Δ'),
-        (r'\\Omega\b', 'Ω'), (r'\\times\b', '×'), (r'\\div\b', '÷'), (r'\\pm\b', '±'),
-        (r'\\leq?\b', '≤'), (r'\\geq?\b', '≥'), (r'\\neq\b', '≠'), (r'\\approx\b', '≈'),
-        (r'\\infty\b', '∞'), (r'\\rightarrow\b', '→'), (r'\\leftarrow\b', '←'),
-        (r'\\Rightarrow\b', '⇒'), (r'\\degree\b', '°'), (r'\\circ\b', '°'),
-        (r'\\textemdash\b', '-'), (r'\\cdot\b', '·'), (r'\\textbardbl\b', '='),
-        (r'\\overset\{([^}]+)\}\{([^}]+)\}', r'\2(\1)'), (r'\\colon\b', ':')
+        (r'\\alpha\b', ' α '), (r'\\beta\b', ' β '), (r'\\gamma\b', ' γ '), (r'\\delta\b', ' δ '),
+        (r'\\epsilon\b', ' ε '), (r'\\theta\b', ' θ '), (r'\\lambda\b', ' λ '), (r'\\mu\b', ' μ '),
+        (r'\\pi\b', ' π '), (r'\\sigma\b', ' σ '), (r'\\omega\b', ' ω '), (r'\\Delta\b', ' Δ '),
+        (r'\\Omega\b', ' Ω '), (r'\\times\b', ' × '), (r'\\div\b', ' ÷ '), (r'\\pm\b', ' ± '),
+        (r'\\leq?\b', ' ≤ '), (r'\\geq?\b', ' ≥ '), (r'\\neq\b', ' ≠ '), (r'\\approx\b', ' ≈ '),
+        (r'\\infty\b', ' ∞ '), (r'\\rightarrow\b', ' → '), (r'\\leftarrow\b', ' ← '),
+        (r'\\Rightarrow\b', ' ⇒ '), (r'\\degree\b', '°'), (r'\\circ\b', '°'),
+        (r'\\textemdash\b', '-'), (r'\\cdot\b', '·'), (r'\\textbardbl\b', '='), (r'\\colon\b', ':')
     ]
     for pattern, symbol in replacements:
         t = re.sub(pattern, symbol, t)
         
-    # 10. Superscripts and Subscripts
+    # 11. Superscripts and Subscripts
     sub_map = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
     sup_map = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
     
@@ -79,11 +98,19 @@ def sanitize_text_for_word(text):
     t = t.replace('^-1', '⁻¹').replace('^-2', '⁻²').replace('^-3', '⁻³')
     t = t.replace('^2', '²').replace('^3', '³')
 
-    # 11. Final Cleanup
-    t = t.replace('$', '')
+    # 12. Final Cleanup
+    t = t.replace('$', '').replace(r'\(', '').replace(r'\)', '')
     t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)
     t = re.sub(r'\\\s*', ' ', t)
-    t = re.sub(r'\s+', ' ', t)
+    
+    # Restore URLs
+    for idx, url in enumerate(urls):
+        t = t.replace(f"__URL_PLACEHOLDER_{idx}__", url)
+        
+    # Remove artificial outer bracket wraps e.g. (60 kg) -> 60 kg
+    t = re.sub(r'(?<![a-zA-Z0-9/])\(\s*([a-zA-Z0-9\s.=+\-²³α-ωΑ-Ω]+)\s*\)(?![a-zA-Z0-9/])', r'\1', t)
+
+    t = re.sub(r'[ \t]+', ' ', t)
     
     return t.strip()
 
