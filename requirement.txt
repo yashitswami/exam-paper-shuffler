@@ -1,4 +1,4 @@
 streamlit
 pandas
 openpyxl
-python-docx
+python-docx==1.1.0
