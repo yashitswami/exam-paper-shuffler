@@ -5,10 +5,95 @@ from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
+def extract_balanced_braces(text, start_pos):
+    """
+    Finds and returns the content of the balanced braces starting at start_pos (which points to '{').
+    Returns (content, end_index)
+    """
+    if start_pos >= len(text) or text[start_pos] != '{':
+        return None, start_pos
+    
+    depth = 0
+    for i in range(start_pos, len(text)):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start_pos+1:i], i + 1
+    return None, start_pos
+
+def replace_fractions(text):
+    """
+    Recursively replaces \frac{A}{B} and \dfrac{A}{B} with (A / B) using balanced brace matching.
+    """
+    for fn in [r'\dfrac', r'\frac']:
+        while True:
+            idx = text.find(fn)
+            if idx == -1:
+                break
+            arg1_start = text.find('{', idx + len(fn))
+            if arg1_start == -1:
+                break
+            num, arg1_end = extract_balanced_braces(text, arg1_start)
+            if num is None:
+                break
+            
+            arg2_start = text.find('{', arg1_end)
+            if arg2_start == -1 or text[arg1_end:arg2_start].strip() != '':
+                break
+            den, arg2_end = extract_balanced_braces(text, arg2_start)
+            if den is None:
+                break
+            
+            replacement = f"({num.strip()} / {den.strip()})"
+            text = text[:idx] + replacement + text[arg2_end:]
+    return text
+
+def replace_overunder_sets(text):
+    """
+    Replaces \overset{top}{base} and \underset{bottom}{base} with base(top) / base(bottom)
+    for clean chemical structural representations.
+    """
+    for fn in [r'\overset', r'\underset']:
+        while True:
+            idx = text.find(fn)
+            if idx == -1:
+                break
+            arg1_start = text.find('{', idx + len(fn))
+            if arg1_start == -1:
+                break
+            top, arg1_end = extract_balanced_braces(text, arg1_start)
+            if top is None:
+                break
+            
+            arg2_start = text.find('{', arg1_end)
+            if arg2_start == -1:
+                break
+            base, arg2_end = extract_balanced_braces(text, arg2_start)
+            if base is None:
+                break
+            
+            # Clean up structural bond symbols inside top/base
+            top_clean = top.replace(r'\mid', '').replace('|', '').replace('=', '').replace(r'\textbardbl', '=').strip()
+            top_clean = re.sub(r'^\{+|\}$', '', top_clean)
+            base_clean = base.replace(r'\mid', '').replace('|', '').strip()
+            base_clean = re.sub(r'^\{+|\}$', '', base_clean)
+            
+            if top_clean and base_clean and base_clean not in ['=', r'\textbardbl']:
+                replacement = f"{base_clean}({top_clean})"
+            elif top_clean:
+                replacement = f"({top_clean})"
+            else:
+                replacement = base_clean
+                
+            text = text[:idx] + replacement + text[arg2_end:]
+    return text
+
 def sanitize_text_for_word(text):
     """
-    Converts raw LaTeX equations, structural formulas, and URLs into clean, 
-    readable plain text for Word documents.
+    Converts raw LaTeX equations, structural formulas, and units into clean, 
+    human-readable plain text for Word documents.
     """
     if pd.isna(text) or text is None:
         return ""
@@ -27,37 +112,28 @@ def sanitize_text_for_word(text):
     t = t.replace('&lt;', '<').replace('&gt;', '>')
     t = t.replace(r'\lt', '<').replace(r'\gt', '>')
     
-    # 2. Convert Overset / Underset (Chemical / Structural notation)
-    while r'\overset' in t or r'\underset' in t:
-        t_new = re.sub(r'\\overset\{([^}]*)\}\{([^}]*)\}', r'\2(\1)', t)
-        t_new = re.sub(r'\\underset\{([^}]*)\}\{([^}]*)\}', r'\2(\1)', t_new)
-        if t_new == t:
-            break
-        t = t_new
+    # 2. Structural chemical Overset / Underset replacement
+    t = replace_overunder_sets(t)
 
-    # 3. Clean Matrices / Arrays / Tables
-    t = re.sub(r'\\begin\{(matrix|array|align|equation|table)\}(?:\[[^\]]*\])?(?:\{[^}]*\})?', '\n', t)
-    t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '\n', t)
-    t = t.replace(r'\\', '\n').replace(r'\hline', '').replace(r'\quad', ' ')
+    # 3. Fractions replacement with balanced brace handling
+    t = replace_fractions(t)
+
+    # 4. Clean Matrices / Arrays / Tables
+    t = re.sub(r'\\begin\{(matrix|array|align|equation|table)\}(?:\[[^\]]*\])?(?:\{[^}]*\})?', '', t)
+    t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '', t)
+    t = t.replace(r'\\', ' ').replace(r'\hline', '').replace(r'\quad', ' ')
     t = re.sub(r'\s*&\s*', ' | ', t)
     
-    # 4. Clean Text Formatting Commands
+    # 5. Clean Text Formatting Commands
     t = re.sub(r'\\text(?:bf|it|rm|sf|tt)?\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\math(?:rm|bf|it|sf|bb|cal)?\{([^}]+)\}', r'\1', t)
     t = t.replace(r'\displaystyle', '')
     
-    # 5. Vectors and Unit Vectors
+    # 6. Vectors and Unit Vectors
     t = re.sub(r'\\(?:overrightarrow|vec)\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\(?:widehat|hat)\{([ijk])\}', r'\1̂', t)
     t = re.sub(r'\\(?:widehat|hat)\{([^}]+)\}', r'\1', t)
     
-    # 6. Fractions (\frac and \dfrac)
-    for _ in range(5):
-        new_t = re.sub(r'\\d?frac\{([^{}]+)\}\{([^{}]+)\}', r'(\1 / \2)', t)
-        if new_t == t:
-            break
-        t = new_t
-        
     # 7. Square Roots (\sqrt)
     t = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', t)
     t = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', t)
@@ -69,32 +145,43 @@ def sanitize_text_for_word(text):
     t = t.replace(r'\lbrack', '[').replace(r'\rbrack', ']')
     t = t.replace(r'\{', '{').replace(r'\}', '}')
     
-    # 9. Trigonometric & Math Functions
-    t = re.sub(r'\\(sin|cos|tan|cot|sec|csc|log|ln)\b', r' \1 ', t)
+    # 9. Inverse Trig & Math Functions (e.g., \sin^{-1}, \tan^{-1})
+    t = re.sub(r'\\(sin|cos|tan|cot|sec|csc)\^\{\s*\-\s*1\s*\}', r'\1⁻¹', t)
+    t = re.sub(r'\\(sin|cos|tan|cot|sec|csc)\b', r'\1', t)
+    t = re.sub(r'\\(log|ln)\b', r'\1', t)
     
     # 10. Greek letters, Operators, & Symbols
     replacements = [
-        (r'\\alpha\b', ' α '), (r'\\beta\b', ' β '), (r'\\gamma\b', ' γ '), (r'\\delta\b', ' δ '),
-        (r'\\epsilon\b', ' ε '), (r'\\theta\b', ' θ '), (r'\\lambda\b', ' λ '), (r'\\mu\b', ' μ '),
-        (r'\\pi\b', ' π '), (r'\\sigma\b', ' σ '), (r'\\omega\b', ' ω '), (r'\\Delta\b', ' Δ '),
-        (r'\\Omega\b', ' Ω '), (r'\\times\b', ' × '), (r'\\div\b', ' ÷ '), (r'\\pm\b', ' ± '),
-        (r'\\leq?\b', ' ≤ '), (r'\\geq?\b', ' ≥ '), (r'\\neq\b', ' ≠ '), (r'\\approx\b', ' ≈ '),
-        (r'\\infty\b', ' ∞ '), (r'\\rightarrow\b', ' → '), (r'\\leftarrow\b', ' ← '),
-        (r'\\Rightarrow\b', ' ⇒ '), (r'\\degree\b', '°'), (r'\\circ\b', '°'),
+        (r'\\alpha\b', 'α'), (r'\\beta\b', 'β'), (r'\\gamma\b', 'γ'), (r'\\delta\b', 'δ'),
+        (r'\\epsilon\b', 'ε'), (r'\\theta\b', 'θ'), (r'\\lambda\b', 'λ'), (r'\\mu\b', 'μ'),
+        (r'\\pi\b', 'π'), (r'\\sigma\b', 'σ'), (r'\\omega\b', 'ω'), (r'\\Delta\b', 'Δ'),
+        (r'\\Omega\b', 'Ω'), (r'\\times\b', '×'), (r'\\div\b', '÷'), (r'\\pm\b', '±'),
+        (r'\\leq?\b', '≤'), (r'\\geq?\b', '≥'), (r'\\neq\b', '≠'), (r'\\approx\b', '≈'),
+        (r'\\infty\b', '∞'), (r'\\rightarrow\b', '→'), (r'\\leftarrow\b', '←'),
+        (r'\\Rightarrow\b', '⇒'), (r'\\degree\b', '°'), (r'\\circ\b', '°'),
         (r'\\textemdash\b', '-'), (r'\\cdot\b', '·'), (r'\\textbardbl\b', '='), (r'\\colon\b', ':')
     ]
     for pattern, symbol in replacements:
         t = re.sub(pattern, symbol, t)
+
+    # Clean Degree Notation artifacts like {^{°}}, {^°}, {°}
+    t = re.sub(r'\{\s*\^?\s*°\s*\}', '°', t)
+    t = re.sub(r'\^\s*°', '°', t)
+    t = t.replace('{°}', '°')
         
-    # 11. Superscripts and Subscripts
-    sub_map = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
-    sup_map = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
+    # 11. Superscripts and Subscripts (handles negative signs and spaces gracefully)
+    sub_map = str.maketrans("0123456789+-=() ", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ ")
+    sup_map = str.maketrans("0123456789+-=() ", "⁰¹²³⁴⁵₆₇⁸⁹⁺⁻⁼⁽⁾ ")
     
-    t = re.sub(r'\_\{([0-9+\-=()]+)\}', lambda m: m.group(1).translate(sub_map), t)
-    t = re.sub(r'\^\{([0-9+\-=()]+)\}', lambda m: m.group(1).translate(sup_map), t)
+    # Translate _{...} and ^{...}
+    t = re.sub(r'\_\{([0-9+\-=()\s]+)\}', lambda m: m.group(1).translate(sub_map), t)
+    t = re.sub(r'\^\{([0-9+\-=()\s]+)\}', lambda m: m.group(1).translate(sup_map), t)
     t = re.sub(r'\_([0-9])', lambda m: m.group(1).translate(sub_map), t)
     t = re.sub(r'\^([0-9])', lambda m: m.group(1).translate(sup_map), t)
     
+    # Normalize common units / exponents
+    t = t.replace('⁻ 1', '⁻¹').replace('⁻ 2', '⁻²').replace('⁻ 3', '⁻³')
+    t = t.replace('⁺ 1', '⁺¹').replace('⁺ 2', '⁺²')
     t = t.replace('^-1', '⁻¹').replace('^-2', '⁻²').replace('^-3', '⁻³')
     t = t.replace('^2', '²').replace('^3', '³')
 
@@ -107,7 +194,10 @@ def sanitize_text_for_word(text):
     for idx, url in enumerate(urls):
         t = t.replace(f"__URL_PLACEHOLDER_{idx}__", url)
         
-    # Remove artificial outer bracket wraps e.g. (60 kg) -> 60 kg
+    # Clean up double nested parentheses e.g. ( (4R / H) ) -> (4R / H)
+    t = re.sub(r'\(\s*\(\s*([^()]+)\s*\)\s*\)', r'(\1)', t)
+    
+    # Remove artificial outer bracket wraps around numbers/units e.g. (60 kg) -> 60 kg
     t = re.sub(r'(?<![a-zA-Z0-9/])\(\s*([a-zA-Z0-9\s.=+\-²³α-ωΑ-Ω]+)\s*\)(?![a-zA-Z0-9/])', r'\1', t)
 
     t = re.sub(r'[ \t]+', ' ', t)
