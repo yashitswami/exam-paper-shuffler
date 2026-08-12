@@ -7,7 +7,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def sanitize_text_for_word(text):
     """
-    Converts raw LaTeX equations and code into clean, readable plain text for Word documents.
+    Converts raw LaTeX equations into clean, readable plain text for Word documents safely.
     """
     if pd.isna(text) or text is None:
         return ""
@@ -23,7 +23,7 @@ def sanitize_text_for_word(text):
     t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '', t)
     t = t.replace(r'\hline', ' | ').replace(r'\quad', ' ')
     
-    # 3. Clean text formatting commands FIRST (before math/superscript processing)
+    # 3. Clean text formatting commands FIRST
     t = re.sub(r'\\text(?:bf|it|rm|sf|tt)?\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\math(?:rm|bf|it|sf|bb|cal)?\{([^}]+)\}', r'\1', t)
     
@@ -32,9 +32,12 @@ def sanitize_text_for_word(text):
     t = re.sub(r'\\(?:widehat|hat)\{([ijk])\}', r'\1̂', t)
     t = re.sub(r'\\(?:widehat|hat)\{([^}]+)\}', r'\1', t)
     
-    # 5. Fractions (\frac and \dfrac)
-    while re.search(r'\\d?frac\{', t):
-        t = re.sub(r'\\d?frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', t)
+    # 5. SAFE Fraction Replacement (Max 5 passes to prevent infinite loops)
+    for _ in range(5):
+        new_t = re.sub(r'\\d?frac\{([^{}]+)\}\{([^{}]+)\}', r'(\1 / \2)', t)
+        if new_t == t:
+            break
+        t = new_t
         
     # 6. Square Roots (\sqrt)
     t = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', t)
@@ -49,7 +52,7 @@ def sanitize_text_for_word(text):
     # 8. Trigonometric & Math Functions
     t = re.sub(r'\\(sin|cos|tan|cot|sec|csc|log|ln)\b', r'\1', t)
     
-    # 9. Greek letters, Operators, & LaTeX Symbols (Using strict word boundaries)
+    # 9. Greek letters, Operators, & LaTeX Symbols
     replacements = [
         (r'\\alpha\b', 'α'), (r'\\beta\b', 'β'), (r'\\gamma\b', 'γ'), (r'\\delta\b', 'δ'),
         (r'\\epsilon\b', 'ε'), (r'\\theta\b', 'θ'), (r'\\lambda\b', 'λ'), (r'\\mu\b', 'μ'),
@@ -64,7 +67,7 @@ def sanitize_text_for_word(text):
     for pattern, symbol in replacements:
         t = re.sub(pattern, symbol, t)
         
-    # 10. Superscripts and Subscripts (Numbers and basic operators only)
+    # 10. Superscripts and Subscripts
     sub_map = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
     sup_map = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
     
@@ -73,15 +76,14 @@ def sanitize_text_for_word(text):
     t = re.sub(r'\_([0-9])', lambda m: m.group(1).translate(sub_map), t)
     t = re.sub(r'\^([0-9])', lambda m: m.group(1).translate(sup_map), t)
     
-    # Common exponents
     t = t.replace('^-1', '⁻¹').replace('^-2', '⁻²').replace('^-3', '⁻³')
     t = t.replace('^2', '²').replace('^3', '³')
 
-    # 11. Final Cleanup of Math mode delimiters and residual backslashes
+    # 11. Final Cleanup
     t = t.replace('$', '')
-    t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)  # Strip remaining \command prefixes
-    t = re.sub(r'\\\s*', ' ', t)            # Strip escaped spaces
-    t = re.sub(r'\s+', ' ', t)              # Normalize multiple spaces
+    t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)
+    t = re.sub(r'\\\s*', ' ', t)
+    t = re.sub(r'\s+', ' ', t)
     
     return t.strip()
 
