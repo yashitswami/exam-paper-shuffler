@@ -8,8 +8,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def extract_balanced_braces(text, start_pos):
     """
-    Finds and returns the content of the balanced braces starting at start_pos (which points to '{').
-    Returns (content, end_index)
+    Finds and returns the content of balanced braces starting at start_pos ('{').
+    Returns (content, end_index).
     """
     if start_pos >= len(text) or text[start_pos] != '{':
         return None, start_pos
@@ -26,7 +26,7 @@ def extract_balanced_braces(text, start_pos):
 
 def replace_fractions(text):
     """
-    Recursively replaces \frac{A}{B} and \dfrac{A}{B} with (A / B) using balanced brace matching.
+    Replaces \\frac{A}{B} and \\dfrac{A}{B} with (A / B) using balanced brace matching.
     """
     for fn in [r'\dfrac', r'\frac']:
         while True:
@@ -53,8 +53,7 @@ def replace_fractions(text):
 
 def replace_overunder_sets(text):
     """
-    Replaces \overset{top}{base} and \underset{bottom}{base} with base(top) / base(bottom)
-    for clean chemical structural representations.
+    Replaces \\overset{top}{base} and \\underset{bottom}{base} with condensed chemical structure notation.
     """
     for fn in [r'\overset', r'\underset']:
         while True:
@@ -92,14 +91,14 @@ def replace_overunder_sets(text):
 
 def sanitize_text_for_word(text):
     """
-    Converts raw LaTeX equations, structural formulas, and units into clean, 
-    human-readable plain text for Word documents.
+    Converts raw LaTeX equations and chemical formulas into clean plain text for Word documents.
     """
     if pd.isna(text) or text is None:
         return ""
     
     t = str(text).strip()
     
+    # Protect URLs
     urls = []
     def preserve_url(match):
         urls.append(match.group(0).replace(r'\_', '_'))
@@ -107,38 +106,47 @@ def sanitize_text_for_word(text):
     
     t = re.sub(r'https?://[^\s]+', preserve_url, t)
     
+    # Unescape comparison operators
     t = t.replace('&lt;', '<').replace('&gt;', '>')
     t = t.replace(r'\lt', '<').replace(r'\gt', '>')
     
+    # Parse chemical structures and fractions
     t = replace_overunder_sets(t)
     t = replace_fractions(t)
 
+    # Clean LaTeX matrices and tables
     t = re.sub(r'\\begin\{(matrix|array|align|equation|table)\}(?:\[[^\]]*\])?(?:\{[^}]*\})?', '', t)
     t = re.sub(r'\\end\{(matrix|array|align|equation|table)\}', '', t)
     t = t.replace(r'\\', ' ').replace(r'\hline', '').replace(r'\quad', ' ')
     t = re.sub(r'\s*&\s*', ' | ', t)
     
+    # Clean text wrappers
     t = re.sub(r'\\text(?:bf|it|rm|sf|tt)?\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\math(?:rm|bf|it|sf|bb|cal)?\{([^}]+)\}', r'\1', t)
     t = t.replace(r'\displaystyle', '')
     
+    # Vectors
     t = re.sub(r'\\(?:overrightarrow|vec)\{([^}]+)\}', r'\1', t)
     t = re.sub(r'\\(?:widehat|hat)\{([ijk])\}', r'\1̂', t)
     t = re.sub(r'\\(?:widehat|hat)\{([^}]+)\}', r'\1', t)
     
+    # Square roots
     t = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', t)
     t = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', t)
     t = re.sub(r'\\sqrt\s*([a-zA-Z0-9]+)', r'√\1', t)
     
+    # Delimiters
     t = re.sub(r'\\(left|right)\b', '', t)
     t = t.replace(r'\leftlbrack', '[').replace(r'\rightrbrack', ']')
     t = t.replace(r'\lbrack', '[').replace(r'\rbrack', ']')
     t = t.replace(r'\{', '{').replace(r'\}', '}')
     
+    # Inverse Trig functions
     t = re.sub(r'\\(sin|cos|tan|cot|sec|csc)\^\{\s*\-\s*1\s*\}', r'\1⁻¹', t)
     t = re.sub(r'\\(sin|cos|tan|cot|sec|csc)\b', r'\1', t)
     t = re.sub(r'\\(log|ln)\b', r'\1', t)
     
+    # Greek Letters & Math Symbols
     replacements = [
         (r'\\alpha\b', 'α'), (r'\\beta\b', 'β'), (r'\\gamma\b', 'γ'), (r'\\delta\b', 'δ'),
         (r'\\epsilon\b', 'ε'), (r'\\theta\b', 'θ'), (r'\\lambda\b', 'λ'), (r'\\mu\b', 'μ'),
@@ -156,8 +164,9 @@ def sanitize_text_for_word(text):
     t = re.sub(r'\^\s*°', '°', t)
     t = t.replace('{°}', '°')
         
+    # Subscripts and Superscripts
     sub_map = str.maketrans("0123456789+-=() ", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ ")
-    sup_map = str.maketrans("0123456789+-=() ", "⁰¹²³⁴⁵₆₇⁸⁹⁺⁻⁼⁽⁾ ")
+    sup_map = str.maketrans("0123456789+-=() ", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ ")
     
     t = re.sub(r'\_\{([0-9+\-=()\s]+)\}', lambda m: m.group(1).translate(sub_map), t)
     t = re.sub(r'\^\{([0-9+\-=()\s]+)\}', lambda m: m.group(1).translate(sup_map), t)
@@ -173,6 +182,7 @@ def sanitize_text_for_word(text):
     t = re.sub(r'\\([a-zA-Z]+)', r'\1', t)
     t = re.sub(r'\\\s*', ' ', t)
     
+    # Restore URLs
     for idx, url in enumerate(urls):
         t = t.replace(f"__URL_PLACEHOLDER_{idx}__", url)
         
