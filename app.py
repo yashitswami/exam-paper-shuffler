@@ -1,10 +1,10 @@
 import sys, subprocess
 
-# Auto-install missing word generation library on Streamlit Cloud if requirements.txt was skipped
+# Auto-install missing libraries with user permissions on Streamlit Cloud
 try:
     import docx
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-docx", "openpyxl"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "python-docx", "openpyxl"])
 
 import streamlit as st
 import os, zipfile, shutil
